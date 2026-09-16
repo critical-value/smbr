@@ -44,8 +44,8 @@ jobs:
           dependencies: '"all"'
       - uses: r-lib/actions/check-r-package@v2
         with:
-          error-on: 'warning'
-          check-dir: check
+          error-on: '"warning"'
+          check-dir: '"check"'
 
   integration:
     name: Linux integration with Samba container
