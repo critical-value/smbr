@@ -38,7 +38,9 @@ jobs:
           sudo apt-get install --no-install-recommends -y libsmbclient-dev pkg-config
       - name: Install native Samba dependency on macOS
         if: runner.os == 'macOS'
-        run: brew install samba pkg-config
+        run: |
+          brew install samba pkg-config
+          echo "MACOSX_DEPLOYMENT_TARGET=$(sw_vers -productVersion | cut -d. -f1-2)" >> "$GITHUB_ENV"
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
           dependencies: '"all"'
