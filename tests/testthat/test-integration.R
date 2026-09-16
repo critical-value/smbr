@@ -33,5 +33,5 @@ test_that("smbr can list and transfer files over SMB", {
   smb_rename(renamed, remote)
 
   smb_download(remote, local)
-  expect_identical(readLines(local), "hello from smbr")
+  expect_identical(readLines(local), c("hello from smbr", "appended"))
 })
