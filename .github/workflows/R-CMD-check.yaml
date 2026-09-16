@@ -41,7 +41,7 @@ jobs:
         run: brew install samba pkg-config
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
-          dependencies: '"hard"'
+          dependencies: '"all"'
       - uses: r-lib/actions/check-r-package@v2
         with:
           error-on: 'warning'
@@ -59,7 +59,7 @@ jobs:
             r-base r-base-dev libsmbclient-dev pkg-config smbclient
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
-          dependencies: '"hard"'
+          dependencies: '"all"'
       - name: Build Samba test image
         run: docker build -t smbr-samba-test .github/samba
       - name: Start Samba test server

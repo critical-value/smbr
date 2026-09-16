@@ -1,5 +1,7 @@
 # smbr
 
+[![R-CMD-check](https://github.com/critical-value/smbr/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/critical-value/smbr/actions/workflows/R-CMD-check.yaml)
+
 `smbr` is a focused, R-native interface to SMB/CIFS file shares. It uses Samba's `libsmbclient` library through Rcpp and does not require Python, `reticulate`, or a Python environment.
 
 ## Installation
