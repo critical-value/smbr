@@ -1,0 +1,30 @@
+# R session and project files
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+*.Rproj
+
+# R package build artifacts
+*.tar.gz
+src/Makevars
+src/Makevars.win
+src/*.o
+src/*.so
+src/*.dll
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100/
+.Trashes/
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/

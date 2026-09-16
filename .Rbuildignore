@@ -1,0 +1,8 @@
+^\.git$
+^\.github$
+^src/Makevars$
+^src/.*\.o$
+^src/.*\.so$
+^src/.*\.dll$
+^.*\.tar\.gz$
+^SKILL\.md$

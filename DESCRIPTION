@@ -1,0 +1,25 @@
+Package: smbr
+Type: Package
+Title: Tidy SMB File Access
+Version: 0.1.0
+Authors@R: person("smbr", "Contributors", email = "smbr@example.org", role = c("aut", "cre"))
+Author: smbr Contributors
+Maintainer: smbr Contributors <smbr@example.org>
+Description: A focused, R-native interface to SMB/CIFS file shares through
+    Samba's libsmbclient library. Provides tidyverse-friendly directory
+    listings and simple file transfer verbs without a Python runtime.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Imports:
+    Rcpp,
+    tibble
+LinkingTo:
+    Rcpp
+SystemRequirements: libsmbclient (Samba development headers and library), pkg-config
+Suggests:
+    testthat (>= 3.0.0),
+    dplyr,
+    readr
+Config/testthat/edition: 3
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3

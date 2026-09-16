@@ -1,0 +1,90 @@
+name: R-CMD-check
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  R_KEEP_PKG_SOURCE: yes
+
+jobs:
+  check:
+    name: R ${{ matrix.r }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            r: release
+          - os: ubuntu-latest
+            r: devel
+          - os: macos-latest
+            r: release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: ${{ matrix.r }}
+      - name: Install native Samba dependency on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libsmbclient-dev pkg-config
+      - name: Install native Samba dependency on macOS
+        if: runner.os == 'macOS'
+        run: brew install samba pkg-config
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          dependencies: '"hard"'
+      - uses: r-lib/actions/check-r-package@v2
+        with:
+          error-on: 'warning'
+          check-dir: check
+
+  integration:
+    name: Linux integration with Samba container
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install R, native dependencies, and test client
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            r-base r-base-dev libsmbclient-dev pkg-config smbclient
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          dependencies: '"hard"'
+      - name: Build Samba test image
+        run: docker build -t smbr-samba-test .github/samba
+      - name: Start Samba test server
+        run: |
+          docker run -d --name smbr-samba \
+            --network host \
+            smbr-samba-test
+          for i in $(seq 1 30); do
+            if smbclient -L //127.0.0.1 -U 'smbr%smbrpass' -m SMB3 >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs smbr-samba
+          exit 1
+      - name: Run integration tests
+        env:
+          SMB_TEST_HOST: 127.0.0.1
+          SMB_TEST_USER: smbr
+          SMB_TEST_PASSWORD: smbrpass
+          SMB_TEST_SHARE: share
+        run: R CMD check --no-manual --no-vignettes .
+      - name: Show Samba logs on failure
+        if: failure()
+        run: docker logs smbr-samba
+      - name: Stop Samba test server
+        if: always()
+        run: docker rm -f smbr-samba || true
