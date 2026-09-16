@@ -165,7 +165,10 @@ static int flags_for_mode(const std::string& mode) {
 
   if (operation == 'r') return plus ? O_RDWR : O_RDONLY;
   if (operation == 'w') return (plus ? O_RDWR : O_WRONLY) | O_CREAT | O_TRUNC;
-  return (plus ? O_RDWR : O_WRONLY) | O_CREAT | O_APPEND;
+  // libsmbclient implements O_APPEND by querying the remote file size after
+  // opening the handle. A write-only handle can fail that query with some
+  // Samba servers, so append mode needs a read/write handle internally.
+  return O_RDWR | O_CREAT | O_APPEND;
 }
 
 // [[Rcpp::export]]
