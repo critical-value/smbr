@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+
+rm -f src/Makevars src/*.o src/*.so src/*.dll
+rm -rf src/rust/target

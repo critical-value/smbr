@@ -5,7 +5,7 @@
 #' @param username SMB username. Defaults to `SMB_USER`.
 #' @param password SMB password. Defaults to `SMB_PASSWORD`.
 #' @param workgroup Optional Windows workgroup or domain.
-#' @param debug Native Samba debug level.
+#' @param debug Reserved for backend diagnostics.
 #' @return Invisibly, `TRUE`.
 #' @export
 smb_connect <- function(username = Sys.getenv("SMB_USER"),

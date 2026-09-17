@@ -6,8 +6,8 @@ Authors@R: person("smbr", "Contributors", email = "smbr@example.org", role = c("
 Author: smbr Contributors
 Maintainer: smbr Contributors <smbr@example.org>
 Description: A focused, R-native interface to SMB/CIFS file shares through
-    Samba's libsmbclient library. Provides tidyverse-friendly directory
-    listings and simple file transfer verbs without a Python runtime.
+    the pure-Rust smb2 client library. Provides tidyverse-friendly directory
+    listings and simple file transfer verbs without Python or Samba.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Imports:
@@ -15,7 +15,8 @@ Imports:
     tibble
 LinkingTo:
     Rcpp
-SystemRequirements: libsmbclient (Samba development headers and library), pkg-config
+SystemRequirements: Rust toolchain with Cargo for source builds without a
+    precompiled backend (rustc 1.85 or newer)
 Suggests:
     testthat (>= 3.0.0),
     dplyr,

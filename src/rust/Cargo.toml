@@ -1,0 +1,13 @@
+[package]
+name = "smbr-backend"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+smb2 = "0.22.1"
+tokio = { version = "1", features = ["io-util", "net", "rt", "sync", "time"] }

@@ -1,2 +1,11 @@
-PKG_CPPFLAGS = @SMBCLIENT_CFLAGS@
-PKG_LIBS = @SMBCLIENT_LIBS@
+RUST_DIR = rust
+RUST_LIB = $(RUST_DIR)/target/release/libsmbr_backend.a
+RUST_CARGO = @RUST_CARGO@
+
+PKG_CPPFLAGS =
+PKG_LIBS = $(RUST_LIB) @RUST_SYSTEM_LIBS@
+
+all: $(RUST_LIB)
+
+$(RUST_LIB): $(RUST_DIR)/Cargo.toml $(RUST_DIR)/Cargo.lock $(RUST_DIR)/src/lib.rs
+	$(RUST_CARGO) build --manifest-path $(RUST_DIR)/Cargo.toml --release --locked

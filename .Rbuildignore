@@ -6,3 +6,6 @@
 ^src/.*\.dll$
 ^.*\.tar\.gz$
 ^SKILL\.md$
+^src/rust/target$
+^\.Rcheck$
+^\.delta$

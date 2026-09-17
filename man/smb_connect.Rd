@@ -18,7 +18,7 @@ smb_connect(
 
 \item{workgroup}{Optional Windows workgroup or domain.}
 
-\item{debug}{Native Samba debug level.}
+\item{debug}{Reserved for backend diagnostics.}
 }
 \value{
 Invisibly, \code{TRUE}.

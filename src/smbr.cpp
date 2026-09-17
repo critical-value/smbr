@@ -1,236 +1,185 @@
 #include <Rcpp.h>
-#include <libsmbclient.h>
 #include <algorithm>
-#include <cerrno>
-#include <cstring>
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <unistd.h>
-#include <vector>
+#include <cmath>
+#include <cstdint>
+#include <string>
 
 using namespace Rcpp;
 
-static std::string g_user;
-static std::string g_password;
-static std::string g_workgroup;
-static SMBCCTX* g_ctx = nullptr;
+extern "C" {
+struct smbr_context;
 
-static void clear_string(std::string& value) {
-  std::fill(value.begin(), value.end(), '\0');
-  value.clear();
-  value.shrink_to_fit();
+struct smbr_entry {
+  char* name;
+  int type_code;
+  std::uint64_t size;
+  double created;
+  double modified;
+};
+
+struct smbr_dir_result {
+  smbr_entry* entries;
+  std::size_t len;
+};
+
+struct smbr_stat_result {
+  std::uint64_t size;
+  int is_directory;
+  double created;
+  double modified;
+  double accessed;
+};
+
+struct smbr_bytes_result {
+  unsigned char* data;
+  std::size_t len;
+};
+
+int smbr_connect(const char*, const char*, const char*, const char*, const char*,
+                 int, smbr_context**, char**);
+void smbr_disconnect(smbr_context*);
+void smbr_free_error(char*);
+int smbr_dir(smbr_context*, const char*, smbr_dir_result*, char**);
+void smbr_free_dir(smbr_dir_result*);
+int smbr_stat(smbr_context*, const char*, smbr_stat_result*, char**);
+int smbr_exists(smbr_context*, const char*, int*, char**);
+int smbr_read(smbr_context*, const char*, smbr_bytes_result*, char**);
+void smbr_free_bytes(smbr_bytes_result*);
+int smbr_write(smbr_context*, const char*, const unsigned char*, std::size_t,
+               const char*, char**);
+int smbr_mkdir(smbr_context*, const char*, int, char**);
+int smbr_delete(smbr_context*, const char*, char**);
+int smbr_rename(smbr_context*, const char*, const char*, char**);
 }
 
-static void clear_credentials() {
-  clear_string(g_user);
-  clear_string(g_password);
-  clear_string(g_workgroup);
-}
+static smbr_context* g_ctx = nullptr;
 
-static void copy_auth_value(char* destination, int capacity,
-                            const std::string& value) {
-  if (!destination || capacity <= 0) return;
-  const size_t count = std::min(value.size(), static_cast<size_t>(capacity - 1));
-  std::memcpy(destination, value.data(), count);
-  destination[count] = '\0';
-}
-
-static void auth_cb(const char* srv, const char* shr, char* wg, int wglen,
-                    char* un, int unlen, char* pw, int pwlen) {
-  (void)srv;
-  (void)shr;
-  copy_auth_value(wg, wglen, g_workgroup);
-  copy_auth_value(un, unlen, g_user);
-  copy_auth_value(pw, pwlen, g_password);
-}
-
-static SMBCCTX* context() {
+static void require_context() {
   if (!g_ctx) stop("No active SMB context. Call smb_connect() first.");
-  return g_ctx;
 }
 
-static void check(int result, const std::string& operation) {
-  if (result < 0) {
-    const int error = errno;
-    stop(operation + " failed: " + std::strerror(error));
-  }
+static std::string take_error(char* error) {
+  if (!error) return "unknown smb2 error";
+  std::string message(error);
+  smbr_free_error(error);
+  return message;
+}
+
+static void check_status(int status, char* error, const std::string& operation) {
+  if (status != 0) stop(operation + " failed: " + take_error(error));
+}
+
+static double r_time(double value) {
+  return std::isnan(value) ? NA_REAL : value;
 }
 
 // [[Rcpp::export]]
 void smbr_connect_cpp(std::string username, std::string password,
                       std::string workgroup = "", int debug = 0) {
-  if (g_ctx) { smbc_free_context(g_ctx, 1); g_ctx = nullptr; }
-  clear_credentials();
-  g_user = username; g_password = password; g_workgroup = workgroup;
-  SMBCCTX* candidate = smbc_new_context();
-  if (!candidate) {
-    clear_credentials();
-    stop("Unable to allocate libsmbclient context.");
-  }
-  g_ctx = candidate;
-  smbc_setDebug(g_ctx, debug);
-  smbc_setFunctionAuthData(g_ctx, auth_cb);
-  if (!smbc_init_context(g_ctx)) {
-    smbc_free_context(g_ctx, 1);
+  if (g_ctx) {
+    smbr_disconnect(g_ctx);
     g_ctx = nullptr;
-    clear_credentials();
-    stop("Unable to initialize libsmbclient context.");
   }
+  char* error = nullptr;
+  smbr_context* candidate = nullptr;
+  check_status(smbr_connect(username.c_str(), password.c_str(), workgroup.c_str(),
+                            "", "", debug, &candidate, &error), error,
+               "connect");
+  g_ctx = candidate;
 }
 
 // [[Rcpp::export]]
 void smbr_disconnect_cpp() {
-  if (g_ctx) { smbc_free_context(g_ctx, 1); g_ctx = nullptr; }
-  clear_credentials();
+  if (g_ctx) {
+    smbr_disconnect(g_ctx);
+    g_ctx = nullptr;
+  }
 }
 
 // [[Rcpp::export]]
 DataFrame smbr_dir_cpp(std::string url) {
-  SMBCCTX* c = context();
-  SMBCFILE* d = smbc_getFunctionOpendir(c)(c, url.c_str());
-  if (!d) stop("Unable to open directory: " + std::string(std::strerror(errno)));
+  require_context();
+  char* error = nullptr;
+  smbr_dir_result result{nullptr, 0};
+  check_status(smbr_dir(g_ctx, url.c_str(), &result, &error), error, "directory listing");
+
   CharacterVector name, type, comment;
   IntegerVector code;
-  int read_error = 0;
-  while (true) {
-    errno = 0;
-    struct smbc_dirent* e = smbc_getFunctionReaddir(c)(c, d);
-    if (!e) { read_error = errno; break; }
-    std::string n(e->name);
-    if (n == "." || n == "..") continue;
-    std::string t = "other";
-    if (e->smbc_type == SMBC_DIR) t = "directory";
-    else if (e->smbc_type == SMBC_FILE) t = "file";
-    else if (e->smbc_type == SMBC_LINK) t = "link";
-    name.push_back(n); type.push_back(t); code.push_back((int)e->smbc_type);
-    comment.push_back(e->comment ? std::string(e->comment) : "");
+  for (std::size_t i = 0; i < result.len; ++i) {
+    const smbr_entry& entry = result.entries[i];
+    name.push_back(entry.name ? entry.name : "");
+    type.push_back(entry.type_code == 1 ? "directory" : "file");
+    code.push_back(entry.type_code);
+    comment.push_back("");
   }
-  const int close_result = smbc_getFunctionClosedir(c)(c, d);
-  const int close_error = errno;
-  if (read_error != 0) {
-    stop("readdir failed: " + std::string(std::strerror(read_error)));
-  }
-  if (close_result < 0) {
-    stop("closedir failed: " + std::string(std::strerror(close_error)));
-  }
+  smbr_free_dir(&result);
   return DataFrame::create(_["name"] = name, _["type"] = type,
                            _["smbc_type"] = code, _["comment"] = comment);
 }
 
 // [[Rcpp::export]]
 List smbr_stat_cpp(std::string url) {
-  SMBCCTX* c = context(); struct stat st;
-  check(smbc_getFunctionStat(c)(c, url.c_str(), &st), "stat");
-  return List::create(_["size"] = (double)st.st_size,
-                      _["mode"] = (int)st.st_mode,
-                      _["is_directory"] = (bool)S_ISDIR(st.st_mode),
-                      _["mtime"] = (double)st.st_mtime,
-                      _["atime"] = (double)st.st_atime,
-                      _["ctime"] = (double)st.st_ctime);
+  require_context();
+  char* error = nullptr;
+  smbr_stat_result result{};
+  check_status(smbr_stat(g_ctx, url.c_str(), &result, &error), error, "stat");
+  return List::create(_["size"] = static_cast<double>(result.size),
+                      _["mode"] = 0,
+                      _["is_directory"] = result.is_directory != 0,
+                      _["mtime"] = r_time(result.modified),
+                      _["atime"] = r_time(result.accessed),
+                      _["ctime"] = r_time(result.created));
 }
 
 // [[Rcpp::export]]
 bool smbr_exists_cpp(std::string url) {
-  SMBCCTX* c = context(); struct stat st;
-  if (smbc_getFunctionStat(c)(c, url.c_str(), &st) == 0) return true;
-  const int error = errno;
-  if (error == ENOENT) return false;
-  stop("exists failed: " + std::string(std::strerror(error)));
-  return false;
-}
-
-static int flags_for_mode(const std::string& mode) {
-  if (mode.empty()) {
-    stop("mode must be a non-empty combination of r, w, or a with optional b and +");
-  }
-
-  const char operation = mode[0];
-  if (operation != 'r' && operation != 'w' && operation != 'a') {
-    stop("mode must start with r, w, or a");
-  }
-
-  bool plus = false;
-  bool binary = false;
-  for (size_t i = 1; i < mode.size(); ++i) {
-    if (mode[i] == '+') {
-      if (plus) stop("mode contains '+' more than once");
-      plus = true;
-    } else if (mode[i] == 'b') {
-      if (binary) stop("mode contains 'b' more than once");
-      binary = true;
-    } else {
-      stop("mode must use only r, w, a, b, and +");
-    }
-  }
-
-  if (operation == 'r') return plus ? O_RDWR : O_RDONLY;
-  if (operation == 'w') return (plus ? O_RDWR : O_WRONLY) | O_CREAT | O_TRUNC;
-  // libsmbclient implements O_APPEND by querying the remote file size after
-  // opening the handle. A write-only handle can fail that query with some
-  // Samba servers, so append mode needs a read/write handle internally.
-  return O_RDWR | O_CREAT | O_APPEND;
+  require_context();
+  char* error = nullptr;
+  int exists = 0;
+  check_status(smbr_exists(g_ctx, url.c_str(), &exists, &error), error, "exists");
+  return exists != 0;
 }
 
 // [[Rcpp::export]]
 RawVector smbr_read_cpp(std::string url) {
-  SMBCCTX* c = context(); SMBCFILE* f = smbc_getFunctionOpen(c)(c, url.c_str(), O_RDONLY, 0);
-  if (!f) stop("Unable to open file: " + std::string(std::strerror(errno)));
-  std::vector<Rbyte> bytes; char buf[65536]; ssize_t n;
-  while ((n = smbc_getFunctionRead(c)(c, f, buf, sizeof(buf))) > 0) {
-    bytes.insert(bytes.end(), (Rbyte*)buf, (Rbyte*)buf + n);
+  require_context();
+  char* error = nullptr;
+  smbr_bytes_result result{nullptr, 0};
+  check_status(smbr_read(g_ctx, url.c_str(), &result, &error), error, "read");
+  RawVector output(result.len);
+  if (result.len > 0) {
+    std::copy(result.data, result.data + result.len, output.begin());
   }
-  if (n < 0) {
-    const int error = errno;
-    smbc_getFunctionClose(c)(c, f);
-    stop("Read failed: " + std::string(std::strerror(error)));
-  }
-  const int close_result = smbc_getFunctionClose(c)(c, f);
-  const int close_error = errno;
-  if (close_result < 0) {
-    stop("Read close failed: " + std::string(std::strerror(close_error)));
-  }
-  RawVector out(bytes.size());
-  std::copy(bytes.begin(), bytes.end(), out.begin());
-  return out;
+  smbr_free_bytes(&result);
+  return output;
 }
 
 // [[Rcpp::export]]
 void smbr_write_cpp(std::string url, RawVector data, std::string mode = "wb") {
-  SMBCCTX* c = context(); SMBCFILE* f = smbc_getFunctionOpen(c)(c, url.c_str(), flags_for_mode(mode), 0666);
-  if (!f) stop("Unable to open file: " + std::string(std::strerror(errno)));
-  R_xlen_t pos = 0;
-  while (pos < data.size()) {
-    ssize_t n = smbc_getFunctionWrite(c)(c, f, (const char*)data.begin() + pos, data.size() - pos);
-    if (n < 0) {
-      const int error = errno;
-      smbc_getFunctionClose(c)(c, f);
-      stop("Write failed: " + std::string(std::strerror(error)));
-    }
-    if (n == 0) {
-      smbc_getFunctionClose(c)(c, f);
-      stop("Write returned zero bytes before the buffer was exhausted");
-    }
-    pos += n;
-  }
-  const int close_result = smbc_getFunctionClose(c)(c, f);
-  const int close_error = errno;
-  if (close_result < 0) {
-    stop("Write close failed: " + std::string(std::strerror(close_error)));
-  }
+  require_context();
+  char* error = nullptr;
+  const unsigned char* bytes = data.size() > 0 ? data.begin() : nullptr;
+  check_status(smbr_write(g_ctx, url.c_str(), bytes, data.size(), mode.c_str(), &error),
+               error, "write");
 }
 
 // [[Rcpp::export]]
 void smbr_mkdir_cpp(std::string url, int mode = 0777) {
-  SMBCCTX* c = context();
-  check(smbc_getFunctionMkdir(c)(c, url.c_str(), mode), "mkdir");
+  require_context();
+  char* error = nullptr;
+  check_status(smbr_mkdir(g_ctx, url.c_str(), mode, &error), error, "mkdir");
 }
+
 // [[Rcpp::export]]
 void smbr_delete_cpp(std::string url) {
-  SMBCCTX* c = context();
-  check(smbc_getFunctionUnlink(c)(c, url.c_str()), "delete");
+  require_context();
+  char* error = nullptr;
+  check_status(smbr_delete(g_ctx, url.c_str(), &error), error, "delete");
 }
+
 // [[Rcpp::export]]
 void smbr_rename_cpp(std::string from, std::string to) {
-  SMBCCTX* c = context();
-  check(smbc_getFunctionRename(c)(c, from.c_str(), c, to.c_str()), "rename");
+  require_context();
+  char* error = nullptr;
+  check_status(smbr_rename(g_ctx, from.c_str(), to.c_str(), &error), error, "rename");
 }

@@ -28,18 +28,13 @@ jobs:
             r: release
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
       - uses: r-lib/actions/setup-r@v2
         with:
           r-version: ${{ matrix.r }}
-      - name: Install native Samba dependency on Linux
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y libsmbclient-dev pkg-config
-      - name: Install native Samba dependency on macOS
+      - name: Set macOS deployment target
         if: runner.os == 'macOS'
         run: |
-          brew install samba pkg-config
           echo "MACOSX_DEPLOYMENT_TARGET=$(sw_vers -productVersion | cut -d. -f1-2)" >> "$GITHUB_ENV"
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
@@ -55,11 +50,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install R, native dependencies, and test client
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install R and test client
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
-            r-base r-base-dev libsmbclient-dev pkg-config smbclient
+            r-base r-base-dev smbclient
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
           dependencies: '"all"'

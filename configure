@@ -1,64 +1,121 @@
 #!/bin/sh
 set -eu
 : "${R_HOME:=$(R RHOME)}"
-CPPFLAGS="${CPPFLAGS:-}"
-LIBS="${LIBS:-}"
 
-SMBR_SAMBA_PREFIX="${SMBR_SAMBA_PREFIX:-}"
-SMBR_SAMBA_INCLUDEDIR=""
-SMBR_SAMBA_LIBDIR=""
-SMBR_SAMBA_PREFIX_PKGCONFIG=0
-
-if [ -n "$SMBR_SAMBA_PREFIX" ]; then
-  if [ -d "$SMBR_SAMBA_PREFIX/include" ]; then
-    SMBR_SAMBA_INCLUDEDIR="$SMBR_SAMBA_PREFIX/include"
-  fi
-  if [ -d "$SMBR_SAMBA_PREFIX/lib" ]; then
-    SMBR_SAMBA_LIBDIR="$SMBR_SAMBA_PREFIX/lib"
-  elif [ -d "$SMBR_SAMBA_PREFIX/lib64" ]; then
-    SMBR_SAMBA_LIBDIR="$SMBR_SAMBA_PREFIX/lib64"
-  fi
-
-  if [ -d "$SMBR_SAMBA_LIBDIR/pkgconfig" ]; then
-    if [ -f "$SMBR_SAMBA_LIBDIR/pkgconfig/smbclient.pc" ]; then
-      SMBR_SAMBA_PREFIX_PKGCONFIG=1
-    fi
-    if [ -n "${PKG_CONFIG_PATH:-}" ]; then
-      PKG_CONFIG_PATH="$SMBR_SAMBA_LIBDIR/pkgconfig:$PKG_CONFIG_PATH"
-    else
-      PKG_CONFIG_PATH="$SMBR_SAMBA_LIBDIR/pkgconfig"
-    fi
-    export PKG_CONFIG_PATH
-  fi
+SMBR_BACKEND_MODE="${SMBR_BACKEND_MODE:-auto}"
+SMBR_CARGO="${CARGO:-}"
+if [ -z "$SMBR_CARGO" ]; then
+  SMBR_CARGO=$(command -v cargo || true)
 fi
 
-if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists smbclient; then
-  CFLAGS=$(pkg-config --cflags smbclient)
-  LDLIBS=$(pkg-config --libs smbclient)
-  if [ "$SMBR_SAMBA_PREFIX_PKGCONFIG" -eq 1 ]; then
-    case "$(uname -s)" in
-      Darwin|Linux) LDLIBS="$LDLIBS -Wl,-rpath,$SMBR_SAMBA_LIBDIR" ;;
-    esac
+case "$(uname -s)" in
+  Darwin) SMBR_RUST_SYSTEM_LIBS="-liconv -lm" ;;
+  Linux) SMBR_RUST_SYSTEM_LIBS="-ldl -lpthread -lm" ;;
+  *) SMBR_RUST_SYSTEM_LIBS="" ;;
+esac
+
+SMBR_BACKEND_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' src/rust/Cargo.toml | head -n 1)
+case "$(uname -s):$(uname -m)" in
+  Darwin:arm64) SMBR_BACKEND_PLATFORM="darwin-arm64" ;;
+  Darwin:x86_64) SMBR_BACKEND_PLATFORM="darwin-x86_64" ;;
+  Linux:x86_64) SMBR_BACKEND_PLATFORM="linux-x86_64" ;;
+  Linux:aarch64) SMBR_BACKEND_PLATFORM="linux-aarch64" ;;
+  *) SMBR_BACKEND_PLATFORM="" ;;
+esac
+
+try_prebuilt_backend() {
+  if [ -z "$SMBR_BACKEND_PLATFORM" ]; then
+    echo "No prebuilt smbr backend is available for $(uname -s)/$(uname -m)." >&2
+    return 1
   fi
-elif [ -n "$SMBR_SAMBA_INCLUDEDIR" ] && [ -n "$SMBR_SAMBA_LIBDIR" ] && [ -f "$SMBR_SAMBA_INCLUDEDIR/libsmbclient.h" ]; then
-  CFLAGS="-I$SMBR_SAMBA_INCLUDEDIR"
-  LDLIBS="-L$SMBR_SAMBA_LIBDIR -lsmbclient"
-  case "$(uname -s)" in
-    Darwin|Linux) LDLIBS="$LDLIBS -Wl,-rpath,$SMBR_SAMBA_LIBDIR" ;;
-  esac
-elif [ -f /usr/include/libsmbclient.h ]; then
-  CFLAGS=""
-  LDLIBS="-lsmbclient"
-elif [ -f /usr/local/include/libsmbclient.h ]; then
-  CFLAGS=""
-  LDLIBS="-lsmbclient"
-elif [ -f /opt/homebrew/include/libsmbclient.h ]; then
-  CFLAGS="-I/opt/homebrew/include"
-  LDLIBS="-L/opt/homebrew/lib -lsmbclient"
-else
-  echo "ERROR: smbr requires Samba libsmbclient development files." >&2
-  echo "Install libsmbclient-dev (Debian/Ubuntu) or the equivalent package." >&2
-  echo "Or set SMBR_SAMBA_PREFIX to a user-local Samba installation." >&2
-  exit 1
-fi
-sed -e "s|@SMBCLIENT_CFLAGS@|$CFLAGS|" -e "s|@SMBCLIENT_LIBS@|$LDLIBS|" src/Makevars.in > src/Makevars
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "curl is required to download the prebuilt smbr backend." >&2
+    return 1
+  fi
+  if ! command -v tar >/dev/null 2>&1; then
+    echo "tar is required to unpack the prebuilt smbr backend." >&2
+    return 1
+  fi
+
+  SMBR_BACKEND_ASSET="smbr-backend-$SMBR_BACKEND_PLATFORM.tar.gz"
+  SMBR_BACKEND_TAG="${SMBR_BACKEND_RELEASE_TAG:-backend-v$SMBR_BACKEND_VERSION}"
+  SMBR_BACKEND_BASE_URL="${SMBR_BACKEND_BASE_URL:-https://github.com/critical-value/smbr/releases/download/$SMBR_BACKEND_TAG}"
+  SMBR_BACKEND_URL="${SMBR_BACKEND_BINARY_URL:-$SMBR_BACKEND_BASE_URL/$SMBR_BACKEND_ASSET}"
+  SMBR_BACKEND_TMP=$(mktemp "${TMPDIR:-/tmp}/smbr-backend.XXXXXX")
+  SMBR_BACKEND_CHECKSUMS="$SMBR_BACKEND_TMP.checksums"
+  trap 'rm -f "$SMBR_BACKEND_TMP" "$SMBR_BACKEND_CHECKSUMS"' EXIT HUP INT TERM
+
+  if ! curl -fsSL "$SMBR_BACKEND_URL" -o "$SMBR_BACKEND_TMP"; then
+    echo "Unable to download the prebuilt backend from $SMBR_BACKEND_URL." >&2
+    return 1
+  fi
+
+  if [ -n "${SMBR_BACKEND_BINARY_SHA256:-}" ]; then
+    SMBR_BACKEND_EXPECTED_SHA256="$SMBR_BACKEND_BINARY_SHA256"
+  elif [ -n "${SMBR_BACKEND_BINARY_URL:-}" ]; then
+    echo "SMBR_BACKEND_BINARY_SHA256 is required with SMBR_BACKEND_BINARY_URL." >&2
+    return 1
+  elif curl -fsSL "$SMBR_BACKEND_BASE_URL/SHA256SUMS" -o "$SMBR_BACKEND_CHECKSUMS"; then
+    SMBR_BACKEND_EXPECTED_SHA256=$(awk -v asset="$SMBR_BACKEND_ASSET" '$2 == asset || $2 == "*" asset { print $1; exit }' "$SMBR_BACKEND_CHECKSUMS")
+  else
+    echo "The prebuilt backend checksum manifest is unavailable." >&2
+    return 1
+  fi
+  if [ -z "${SMBR_BACKEND_EXPECTED_SHA256:-}" ]; then
+    echo "No checksum was published for $SMBR_BACKEND_ASSET." >&2
+    return 1
+  fi
+
+  if command -v shasum >/dev/null 2>&1; then
+    SMBR_BACKEND_ACTUAL_SHA256=$(shasum -a 256 "$SMBR_BACKEND_TMP" | awk '{ print $1 }')
+  elif command -v sha256sum >/dev/null 2>&1; then
+    SMBR_BACKEND_ACTUAL_SHA256=$(sha256sum "$SMBR_BACKEND_TMP" | awk '{ print $1 }')
+  else
+    echo "shasum or sha256sum is required to verify the prebuilt backend." >&2
+    return 1
+  fi
+  if [ "$SMBR_BACKEND_ACTUAL_SHA256" != "$SMBR_BACKEND_EXPECTED_SHA256" ]; then
+    echo "The prebuilt backend checksum does not match." >&2
+    return 1
+  fi
+
+  mkdir -p src/rust/target/release
+  tar -xzf "$SMBR_BACKEND_TMP" -C src/rust/target/release
+  if [ ! -f src/rust/target/release/libsmbr_backend.a ]; then
+    echo "The prebuilt backend archive did not contain libsmbr_backend.a." >&2
+    return 1
+  fi
+  echo "Using prebuilt smbr backend for $SMBR_BACKEND_PLATFORM."
+}
+
+case "$SMBR_BACKEND_MODE" in
+  auto)
+    if ! try_prebuilt_backend; then
+      if [ -z "$SMBR_CARGO" ] || ! command -v rustc >/dev/null 2>&1; then
+        echo "ERROR: smbr could not find a prebuilt backend or a Rust toolchain." >&2
+        echo "Install Rust from https://rustup.rs/ or set SMBR_BACKEND_MODE=prebuilt." >&2
+        exit 1
+      fi
+    fi
+    ;;
+  prebuilt)
+    if ! try_prebuilt_backend; then
+      echo "ERROR: the requested prebuilt smbr backend is unavailable." >&2
+      exit 1
+    fi
+    ;;
+  cargo)
+    if [ -z "$SMBR_CARGO" ] || ! command -v rustc >/dev/null 2>&1; then
+      echo "ERROR: SMBR_BACKEND_MODE=cargo requires Cargo and rustc." >&2
+      exit 1
+    fi
+    ;;
+  *)
+    echo "ERROR: SMBR_BACKEND_MODE must be auto, prebuilt, or cargo." >&2
+    exit 1
+    ;;
+esac
+
+sed -e "s|@RUST_CARGO@|$SMBR_CARGO|" \
+    -e "s|@RUST_SYSTEM_LIBS@|$SMBR_RUST_SYSTEM_LIBS|" \
+    src/Makevars.in > src/Makevars

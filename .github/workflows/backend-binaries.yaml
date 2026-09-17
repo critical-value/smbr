@@ -1,0 +1,59 @@
+name: Build backend binaries
+
+on:
+  push:
+    tags:
+      - 'backend-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: darwin-arm64
+            os: macos-14
+          - platform: darwin-x86_64
+            os: macos-13
+          - platform: linux-x86_64
+            os: ubuntu-latest
+          - platform: linux-aarch64
+            os: ubuntu-24.04-arm
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build backend
+        run: cargo build --manifest-path src/rust/Cargo.toml --release --locked
+      - name: Package backend
+        run: |
+          mkdir -p dist
+          tar -C src/rust/target/release \
+            -czf "dist/smbr-backend-${{ matrix.platform }}.tar.gz" \
+            libsmbr_backend.a
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backend-${{ matrix.platform }}
+          path: dist/smbr-backend-${{ matrix.platform }}.tar.gz
+
+  release:
+    name: Publish backend release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: backend-*
+          merge-multiple: true
+      - name: Create checksums
+        working-directory: dist
+        run: sha256sum smbr-backend-*.tar.gz > SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

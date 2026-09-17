@@ -12,6 +12,7 @@ src/Makevars.win
 src/*.o
 src/*.so
 src/*.dll
+src/rust/target/
 
 # macOS
 .DS_Store
