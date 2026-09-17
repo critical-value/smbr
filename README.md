@@ -12,11 +12,11 @@ Install the Samba development files first. On Debian or Ubuntu:
 sudo apt install libsmbclient-dev pkg-config
 ```
 
-Then install `remotes` and use it to install the package from a local checkout:
+Then install `remotes` and use it to install the package from GitHub:
 
 ```r
 install.packages("remotes")
-remotes::install_local("/path/to/smbr")
+remotes::install_github("critical-value/smbr")
 ```
 
 The package's `configure` script detects `libsmbclient` with `pkg-config` and produces a platform-specific `src/Makevars` file.
