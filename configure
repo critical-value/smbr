@@ -96,6 +96,7 @@ case "$SMBR_BACKEND_MODE" in
         echo "Install Rust from https://rustup.rs/ or set SMBR_BACKEND_MODE=prebuilt." >&2
         exit 1
       fi
+      rustc --version
     fi
     ;;
   prebuilt)
@@ -109,6 +110,7 @@ case "$SMBR_BACKEND_MODE" in
       echo "ERROR: SMBR_BACKEND_MODE=cargo requires Cargo and rustc." >&2
       exit 1
     fi
+    rustc --version
     ;;
   *)
     echo "ERROR: SMBR_BACKEND_MODE must be auto, prebuilt, or cargo." >&2

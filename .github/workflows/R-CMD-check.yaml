@@ -24,7 +24,7 @@ jobs:
             r: release
           - os: ubuntu-latest
             r: devel
-          - os: macos-latest
+          - os: macos-14
             r: release
     steps:
       - uses: actions/checkout@v4
@@ -42,7 +42,7 @@ jobs:
           extra-packages: any::rcmdcheck
       - uses: r-lib/actions/check-r-package@v2
         with:
-          error-on: '"warning"'
+          error-on: '"error"'
           check-dir: '"check"'
 
   integration:
