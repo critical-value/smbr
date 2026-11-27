@@ -24,7 +24,7 @@ jobs:
             r: release
           - os: ubuntu-latest
             r: devel
-          - os: macos-14
+          - os: macos-15
             r: release
     steps:
       - uses: actions/checkout@v4
