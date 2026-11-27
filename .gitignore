@@ -29,3 +29,6 @@ ehthumbs.db
 ehthumbs_vista.db
 Desktop.ini
 $RECYCLE.BIN/
+
+# Delta version control (Zed)
+.delta/
